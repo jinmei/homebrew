@@ -60,6 +60,7 @@ def install f
     if dep.keg_only?
       opt = HOMEBREW_PREFIX/:opt/dep.name
 
+      #TODO try to fix, if only one key, easy, otherwise check formula.version
       raise "#{opt} not present\nReinstall #{dep}. Sorry :(" unless opt.directory?
 
       ENV.prepend_path 'PATH', "#{opt}/bin"

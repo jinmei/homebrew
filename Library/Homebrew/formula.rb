@@ -295,9 +295,9 @@ class Formula
     names.each do |name|
       begin
         yield Formula.factory(name)
-      rescue
+      rescue => e
         # Don't let one broken formula break commands. But do complain.
-        onoe "Formula #{name} will not import."
+        onoe "Formula #{name} will not import (#{e})"
       end
     end
   end
