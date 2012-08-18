@@ -293,11 +293,12 @@ class Formula
 
   def self.each
     names.each do |name|
-      begin
-        yield Formula.factory(name)
+      yield begin
+        Formula.factory(name)
       rescue => e
         # Don't let one broken formula break commands. But do complain.
-        onoe "Formula #{name} will not import (#{e})"
+        onoe "Failed to import: #{name}"
+        next
       end
     end
   end
@@ -462,7 +463,7 @@ protected
     when "xcodebuild"
       ENV.remove_cc_etc
     when /^make\b/
-      ENV.append 'HOMEBREW_OPTS', "O", ''
+      ENV.append 'HOMEBREW_CCC', "O", ''
     end
 
     if ARGV.verbose?
@@ -494,7 +495,7 @@ protected
   rescue
     raise BuildError.new(self, cmd, args, $?)
   ensure
-    ENV['HOMEBREW_OPTS'] = ENV['HOMEBREW_OPTS'].delete('O') if ENV['HOMEBREW_OPTS']
+    ENV['HOMEBREW_CCC'] = ENV['HOMEBREW_CCC'].delete('O') if ENV['HOMEBREW_CCC']
   end
 
 public

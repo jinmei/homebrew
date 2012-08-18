@@ -1,6 +1,6 @@
 #!/bin/sh
 
-source .brew_profile
+HOMEBREW_PREFIX=$(dirname $(dirname $(dirname $(cd $(dirname $0) && pwd))))
 AUTOCONF="$HOMEBREW_PREFIX/bin/autoconf"
 
 if [ -x "$AUTOCONF" ]; then

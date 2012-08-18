@@ -439,14 +439,17 @@ end
 
 class Formula
   def keg_only_text
-    s = ""
-    s << "This formula is keg-only, so it was not symlinked into #{HOMEBREW_PREFIX}.\n\n"
-    s << keg_only_reason.to_s
+    s = "This formula is keg-only: so it was not symlinked into #{HOMEBREW_PREFIX}."
+    s << "\n\n#{keg_only_reason.to_s}"
     if lib.directory? or include.directory?
-      s << "\n\n"
-      s << "Generally there are no consequences of this for you.\n"
-      s << "If you build your own software and it requires this formula, you'll need\n"
-      s << "to add to your build variables:\n\n"
+      s <<
+        <<-EOS.undent_________________________________________________________72
+
+        Generally there are no consequences of this for you. If you build your
+        own software and it requires this formula, you'll need to add to your
+        build variables:
+
+        EOS
       s << "    LDFLAGS:  -L#{HOMEBREW_PREFIX}/opt/#{name}/lib\n" if lib.directory?
       s << "    CPPFLAGS: -I#{HOMEBREW_PREFIX}/opt/#{name}/include\n" if include.directory?
     end

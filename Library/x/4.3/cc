@@ -1,79 +1,161 @@
-#!/bin/sh
-#TODO remove -g, -O2, etc. We determine these flags
-#TODO remove Macports/Fink includes/libpaths
+#!/usr/bin/ruby
+#TODO allow specification of HOMEBREW_CCC to `brew --env` so gem can install against brew's libxml2 etc.
+#TODO keep x11 out of it unless a CCC-opt?
+#TODO troubleshooting flag that removes or adds all CCC-opts
+#when depending on keg-onlys prevent conflicting -Is like eg. cairo
+#TODO force our directories ahead of system directories
+#dedupe -I, -L and -F for legibility
 
-source .brew_profile
+class String
+  def parent; File.dirname self end
+  def directory?; File.directory? self end
+  def basename; File.basename self end
+  def chuzzle; s = chomp; s unless s.empty? end
+end
+class NilClass
+  def chuzzle; end
+  def directory?; false end
+  def parent; end
+end
+class Array
+  def to_flags prefix
+    select{|path| path.directory? }.map{|path| prefix+path }
+  end
+end
+def ccc? flags
+  flags.split('').all?{|c| ENV['HOMEBREW_CCC'].include? c } if ENV['HOMEBREW_CCC']
+end
+def macos
+  tst = Proc.new{|v| v.strip if v =~ /10\.\d/ }
+  tst.call(ENV['HOMEBREW_MACOS']) || tst.call(ENV['MACOS_DEPLOYMENT_TARGET']) || tst.call(`/usr/bin/sw_vers -productVersion`)
+end
+def nclt?
+  not File.executable? "/usr/bin/cc"
+end
+def lxml2?
+  not (deps.include? 'libxml2' or ccc? 'x')
+end
+def deps
+  (ENV['HOMEBREW_DEP_PREFIXES'] || "").split
+end
+def driver
+  case $0
+    when 'cpp' then :cpp
+    when 'ld' then :ld
+    when /^clang/ then :clang
+    when /^llvm/, 'gcc', 'g++' then :gcc
+  end
+end
+def cflags
+  if ccc? 'Ob'
+    %w{-mtune=generic -Oz}
+  elsif ccc? 'O'
+    u = '-arch i386 -arch x86_64' if ccc? 'u'
+    c = case $0 when 'clang', 'clang++' then '-march=native' end
+    %w{-pipe -w -Os} << u << c
+  else
+    []
+  end
+end
+def ldflags
+  ff = deps.map{|dep| "#$brewfix/opt/#{dep}/lib" }
+  ff << "#$brewfix/lib" if nclt? or $brewfix != "/usr/local"
+  ff << "#$x11root/lib" if $x11root
+  ff.to_flags('-L')
+end
+def cppflags
+  ff = deps.map{|dep| "#$brewfix/opt/#{dep}/include" }
+  ff << "#$brewfix/include" if nclt? or $brewfix != "/usr/local"
+  ff << "#$x11root/include" << "#$x11root/include/freetype2" if $x11root
+  ff << "#$sdkroot/usr/include/libxml2" if lxml2?
+  ff.to_flags('-I')
+end
+def ccclean
+  args = []
+  while arg = ARGV.shift
+    case arg
+    when '-arch', /^-Xarch_/
+      ARGV.shift
+    when /^-g\d?/, /^-gstabs\d+/, '-gstabs+', /^-ggdb\d?/, '-gdwarf-2',
+         /^-march=.+/, /^-mtune=.+/, '-m64', '-m32',
+         /^-O[0-9zs]/, '-fast',
+         %r{^-[IL]/opt/local}, %r{^-[IL]/sw},
+         '-pedantic', '-pedantic-errors'
+      #NOOP
+    when /^-W.*/
+      args << arg if arg =~ /^-Wl,/
+    else
+      args << arg
+    end
+  end
+  args
+end
+def xcrun cmd, *args
+  if nclt?
+    exec "xcrun", cmd, *args.compact
+  else
+    exec "/usr/bin/#{cmd}", *args.compact
+  end
+end
 
-DRIVER=`basename $0`
-CFLAGS="-pipe"
+module Kernel extend self
+  alias :_exec :exec
+  def exec *args
+    path = File.expand_path('~/Library/Logs/Homebrew/cc.log')
+    open(path, 'a'){|f| f.puts(args.join(' ')); f.puts }
+    _exec *args
+  end
+end if ENV['HOMEBREW_LOG']
 
-case "$DRIVER" in
-cc)
-  [ $CC ] && DRIVER="$(basename $CC)";;
-c++)
-  [ $CXX ] && DRIVER="$(basename $CXX)";;
-esac
+######################################################################## setup
+$0 = $0.basename
+$0 = case $0 when 'cc' then 'clang' when 'c++' then 'clang++' else $0 end
+$brewfix = File.expand_path("#{__FILE__}/../../../../")
+$sdkroot = begin
+  tst = Proc.new{|path| path.strip if path.directory? and path != "/" }
+  d = tst.call(ENV['DEVELOPER_DIR']) || 
+      tst.call(`xcode-select -print-path`) ||
+      tst.call("/Applications/Xcode.app/Contents/Developer")
+  "#{d}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX#{macos}.sdk"
+end
+$x11root = begin
+  %W{#{$sdkroot}/usr/X11/include /usr/X11/include /opt/X11/include}.find do |incdir|
+    incdir.directory?
+  end.parent
+end
 
-for x in $HOMEBREW_DEP_PREFIXES; do
-  x="$HOMEBREW_PREFIX/opt/$x"
-  [ -d "$x/lib" ] && LDFLAGS="-L$x/lib $LDFLAGS"
-  [ -d "$x/include" ] && CPPFLAGS="-I$x/include $CPPFLAGS"
-done
+####################################################################### sanity
+abort "Bad SDK state" if nclt? and not $sdkroot.directory?
+abort "Bad driver" unless driver
 
-if [ $NCLT ]; then
-  # setting --sysroot removes /usr/include /usr/local/include etc. from the
-  # search paths. So we must add HOMEBREW_PREFIX/include even if /usr/local.
-  CPPFLAGS="--sysroot=$SDKROOT -I$HOMEBREW_PREFIX/include $CPPFLAGS"
-  [ $NLXML2 ] || CPPFLAGS="$CPPFLAGS -I$SDKROOT/usr/include/libxml2"
-  LDFLAGS="-L$HOMEBREW_PREFIX/lib $LDFLAGS"
+######################################################################## logic
+args = if ccc? 'O' and (driver == :clang or driver == :gcc)
+  ccclean
 else
-  DRIVER="/usr/bin/$DRIVER"
-  [ $NLXML2 ] || CPPFLAGS="-I/usr/include/libxml2 $CPPFLAGS"
-  if [ "$HOMEBREW_PREFIX" != "/usr/local" ]; then
-    CPPFLAGS="-I$HOMEBREW_PREFIX/include $CPPFLAGS"
-    LDFLAGS="-L$HOMEBREW_PREFIX/lib $LDFLAGS"
-  fi
-fi
+  ARGV
+end
 
-if [ $X11_PREFIX ]; then
-  LDFLAGS="-L$X11_PREFIX/lib $LDFLAGS"
-  CPPFLAGS="-I$X11_PREFIX/include -I$X11_PREFIX/include/freetype2 $CPPFLAGS"
-fi
+args << if driver == :ld
+  "--syslibroot=#$sdkroot/usr/lib"
+else
+  "--sysroot=#$sdkroot"
+end if nclt?
 
-case "$DRIVER" in
-ld)
-  unset CFLAGS
-  unset CPPFLAGS;;
-cpp)
-  unset LDFLAGS
-  unset CFLAGS
-
-  case "$CC" in
-  clang*|cc|c++)
-    # the "cpp" tool is llvm-gcc and chokes on some of the SDK system headers :P
-    DRIVER="clang -E";;
-  esac
-  ;;
-*)
-  case "$DRIVER" in
-  clang*|cc|c++)
-    # We set "O" when make is called to prevent optimising during configure
-    # This is not ideal, since make isn't the only time we want to optimize...
-    [[ $HOMEBREW_OPTS == *O* ]] && CFLAGS="-march=native -w -Os"
-    # We pass linker flags to cc because most build systems make no distinction
-    # between when they call for a compiler or linker. Thus clang generates
-    # spurious warnings. TODO don't do this: may hide essential information!
-    FLAGS="$FLAGS -Qunused-arguments";;
-  esac
-  # If we're bottling then forget all previously set CFLAGS
-  [[ $HOMEBREW_OPTS == *b*O* ]] && CFLAGS="-mtune=generic"
-esac
-
-[ $HOMEBREW_VERBOSE ] && FLAGS="-v $FLAGS"
-[[ $HOMEBREW_OPTS == *u*O* ]] && CFLAGS="-arch i386 -arch x86_64 $CFLAGS"
-[ $NCLT ] && DRIVER="xcrun $DRIVER"
-
-# very handy to see exactly what is being executed
-[ $HOMEBREW_LOG ] && echo $DRIVER $FLAGS $CFLAGS $CPPFLAGS $LDFLAGS "$@" "\n" >> ~/cc.log
-
-exec $DRIVER $FLAGS $CFLAGS $CPPFLAGS $LDFLAGS "$@"
+case driver
+when :ld
+  xcrun "ld", *(ldflags + args)
+when :cpp
+  cpp = case ENV['CC'] when 'clang', 'cc', nil
+    args.unshift '-E'
+    "clang"
+  else
+    $0
+  end
+  xcrun cpp, *(cppflags + args)
+else
+  if args.include? '-c'
+    xcrun $0, *(cflags + cppflags + args)
+  else
+    xcrun $0, *(cflags + cppflags + ldflags + args)
+  end
+end

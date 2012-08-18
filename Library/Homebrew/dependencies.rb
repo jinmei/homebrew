@@ -116,6 +116,10 @@ class Dependency
   def options
     @tags.select{|p|p.start_with? '--'}
   end
+
+  def to_f
+    Formula.factory(name)
+  end
 end
 
 

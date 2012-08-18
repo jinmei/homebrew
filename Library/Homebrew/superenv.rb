@@ -25,7 +25,7 @@ class << ENV
       CFLAGS CXXFLAGS OBJCFLAGS OBJCXXFLAGS LDFLAGS CPPFLAGS
       MACOS_DEPLOYMENT_TARGET SDKROOT
       CMAKE_PREFIX_PATH CMAKE_INCLUDE_PATH CMAKE_FRAMEWORK_PATH
-      HOMEBREW_OPTS HOMEBREW_DEP_PREFIXES
+      HOMEBREW_CCC HOMEBREW_DEP_PREFIXES
       MAKEFLAGS MAKEJOBS}.
       each{ |x| delete(x) }
     delete('CDPATH') # avoid make issues that depend on changing directories
@@ -49,12 +49,14 @@ class << ENV
     ENV['MAKEFLAGS'] ||= "-j#{Hardware.processor_count}"
     ENV['PATH'] = determine_path
     ENV['PKG_CONFIG_PATH'] = determine_pkg_config_path
-    ENV['HOMEBREW_OPTS'] = 'b' if ARGV.build_bottle?
+    ENV['HOMEBREW_CCC'] = 'b' if ARGV.build_bottle?
     ENV['HOMEBREW_MACOS'] = MACOS_VERSION.to_s
+    ENV['CMAKE_PREFIX_PATH'] = determine_cmake_prefix_path
+    ENV['CMAKE_FRAMEWORK_PATH'] = "#{MacOS.sdk_path}/System/Library/Frameworks" if MacOS.xcode43_without_clt?
   end
 
   def universal_binary
-    append 'HOMEBREW_OPTS', "u", ''
+    append 'HOMEBREW_CCC', "u", ''
   end
 
   private
@@ -101,13 +103,14 @@ class << ENV
   end
 
   def determine_path
+    #TODO pick paths completely ourselves
     paths = ORIGINAL_PATHS.dup
     paths.delete(HOMEBREW_PREFIX/:bin)
     paths.unshift("/opt/X11/bin")
     paths.unshift("#{HOMEBREW_PREFIX}/bin")
-    if MacOS::Xcode.version >= "4.3" and not MacOS.xcode_clt_installed?
-      paths.unshift("#{MacOS.xcode_43_developer_dir}/usr/bin")
-      paths.unshift("#{MacOS.xcode_43_developer_dir}/Toolchains/XcodeDefault.xctoolchain/usr/bin")
+    if MacOS.xcode43_without_clt?
+      paths.unshift("#{MacOS.xcode43_developer_dir}/usr/bin")
+      paths.unshift("#{MacOS.xcode43_developer_dir}/Toolchains/XcodeDefault.xctoolchain/usr/bin")
     end
     paths.unshift(superenv_bin)
     paths.to_path_s
@@ -120,6 +123,13 @@ class << ENV
       # Mountain Lion no longer ships some .pcs; ensure we pick up our versions
       paths << "#{HOMEBREW_REPOSITORY}/Library/Homebrew/pkgconfig"
     end
+    paths.to_path_s
+  end
+
+  def determine_cmake_prefix_path
+    paths = []
+    paths << "#{MacOS.sdk_path}/usr" if MacOS.xcode43_without_clt?
+    paths << HOMEBREW_PREFIX.to_s unless HOMEBREW_PREFIX.to_s == "/usr/local"
     paths.to_path_s
   end
 
@@ -172,7 +182,7 @@ end
 
 class Array
   def to_path_s
-    map(&:to_s).select{|s| s and File.directory? s }.join(':')
+    map(&:to_s).select{|s| s and File.directory? s }.join(':').chuzzle
   end
 end
 
@@ -182,14 +192,18 @@ module MacOS extend self
     File.executable? "/usr/bin/clang" and File.executable? "/usr/bin/lldb"
   end
 
-  def xcode_43_developer_dir
-    @xcode_43_developer_dir ||=
+  def xcode43_without_clt?
+    MacOS::Xcode.version >= "4.3" and not MacOS.xcode_clt_installed?
+  end
+
+  def xcode43_developer_dir
+    @xcode43_developer_dir ||=
       tst(ENV['DEVELOPER_DIR']) ||
       tst(`xcode-select -print-path 2>/dev/null`) ||
       tst("/Applications/Xcode.app/Contents/Developer") ||
       MacOS.mdfind("com.apple.dt.Xcode").find{|path| tst(path) }
-    raise unless @xcode_43_developer_dir
-    @xcode_43_developer_dir
+    raise unless @xcode43_developer_dir
+    @xcode43_developer_dir
   end
 
   private
