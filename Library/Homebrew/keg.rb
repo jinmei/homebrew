@@ -126,13 +126,19 @@ class Keg < Pathname
 
     linked_keg_record.make_relative_symlink(self) unless mode == :dryrun
 
-    optlink
+    optlink unless mode == :dryrun
 
     return $n + $d
+  rescue Exception
+    opoo "Could not link #{fname}. Unlinking..."
+    unlink
+    raise
   end
 
   def optlink
-    (HOMEBREW_PREFIX/:opt/fname).make_relative_symlink(self)
+    from = HOMEBREW_PREFIX/:opt/fname
+    from.delete if from.symlink?
+    from.make_relative_symlink(self)
   end
 
 protected
