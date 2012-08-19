@@ -52,7 +52,7 @@ class << ENV
     ENV['HOMEBREW_CCC'] = 'b' if ARGV.build_bottle?
     ENV['HOMEBREW_MACOS'] = MACOS_VERSION.to_s
     ENV['CMAKE_PREFIX_PATH'] = determine_cmake_prefix_path
-    ENV['CMAKE_FRAMEWORK_PATH'] = "#{MacOS.sdk_path}/System/Library/Frameworks" if MacOS.xcode43_without_clt?
+    ENV['CMAKE_FRAMEWORK_PATH'] = "#{MacOS.sdk_path}/System/Library/Frameworks" if MacSystem.xcode43_without_clt?
   end
 
   def universal_binary
@@ -96,7 +96,7 @@ class << ENV
       case cc.to_s
         when "clang" then "clang++"
         when "llvm-gcc" then "llvm-g++"
-        when "gcc" then "gcc++"
+        when "gcc" then "g++"
       end
     end
     detcc.call(ENV['CC']) or detcc.call(MacOS.default_compiler) or "c++"
@@ -108,9 +108,9 @@ class << ENV
     paths.delete(HOMEBREW_PREFIX/:bin)
     paths.unshift("/opt/X11/bin")
     paths.unshift("#{HOMEBREW_PREFIX}/bin")
-    if MacOS.xcode43_without_clt?
-      paths.unshift("#{MacOS.xcode43_developer_dir}/usr/bin")
-      paths.unshift("#{MacOS.xcode43_developer_dir}/Toolchains/XcodeDefault.xctoolchain/usr/bin")
+    if MacSystem.xcode43_without_clt?
+      paths.unshift("#{MacSystem.xcode43_developer_dir}/usr/bin")
+      paths.unshift("#{MacSystem.xcode43_developer_dir}/Toolchains/XcodeDefault.xctoolchain/usr/bin")
     end
     paths.unshift(superenv_bin)
     paths.to_path_s
@@ -128,8 +128,9 @@ class << ENV
 
   def determine_cmake_prefix_path
     paths = []
-    paths << "#{MacOS.sdk_path}/usr" if MacOS.xcode43_without_clt?
+    paths << "#{MacOS.sdk_path}/usr" if MacSystem.xcode43_without_clt?
     paths << HOMEBREW_PREFIX.to_s unless HOMEBREW_PREFIX.to_s == "/usr/local"
+    paths << MacSystem.x11_prefix
     paths.to_path_s
   end
 
@@ -187,13 +188,18 @@ class Array
 end
 
 # new code because I don't really trust the Xcode code now having researched it more
-module MacOS extend self
+module MacSystem extend self
   def xcode_clt_installed?
     File.executable? "/usr/bin/clang" and File.executable? "/usr/bin/lldb"
   end
 
   def xcode43_without_clt?
-    MacOS::Xcode.version >= "4.3" and not MacOS.xcode_clt_installed?
+    MacOS::Xcode.version >= "4.3" and not MacSystem.xcode_clt_installed?
+  end
+
+  def x11_prefix
+    @x11_prefix ||= %W[/usr/X11 /opt/X11
+      #{MacOS.sdk_path}/usr/X11].find{|path| File.directory? "#{path}/include" }
   end
 
   def xcode43_developer_dir

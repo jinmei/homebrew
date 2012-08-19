@@ -5,6 +5,8 @@
 #when depending on keg-onlys prevent conflicting -Is like eg. cairo
 #TODO force our directories ahead of system directories
 #dedupe -I, -L and -F for legibility
+#TODO stuff that will be included with <> must be -isystem included for serious
+#TODO make it work with our GCC
 
 class String
   def parent; File.dirname self end
@@ -68,7 +70,7 @@ def cppflags
   ff << "#$brewfix/include" if nclt? or $brewfix != "/usr/local"
   ff << "#$x11root/include" << "#$x11root/include/freetype2" if $x11root
   ff << "#$sdkroot/usr/include/libxml2" if lxml2?
-  ff.to_flags('-I')
+  ff.to_flags('-isystem')
 end
 def ccclean
   args = []
@@ -135,11 +137,12 @@ else
   ARGV
 end
 
-args << if driver == :ld
+newarg = if driver == :ld
   "--syslibroot=#$sdkroot/usr/lib"
 else
   "--sysroot=#$sdkroot"
 end if nclt?
+args.unshift(newarg)
 
 case driver
 when :ld
