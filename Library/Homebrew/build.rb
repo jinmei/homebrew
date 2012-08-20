@@ -51,13 +51,15 @@ at_exit do
 end
 
 def install f
-  ENV.setup_build_environment
+  keg_only_deps = f.recursive_deps.uniq.select{|dep| Formula.factory(dep).keg_only? }
 
-  f.recursive_requirements.each { |req| req.modify_build_environment }
+  if superenv?
+    ENV.deps = keg_only_deps.map(&:to_s)
+    ENV.setup_build_environment
+  else
+    ENV.setup_build_environment
 
-  f.recursive_deps.uniq.each do |dep|
-    dep = Formula.factory dep
-    if dep.keg_only?
+    keg_only_deps.each do |dep|
       opt = HOMEBREW_PREFIX/:opt/dep.name
 
       #TODO try to fix, if only one key, easy, otherwise check formula.version
@@ -66,17 +68,14 @@ def install f
       ENV.prepend_path 'PATH', "#{opt}/bin"
       ENV.prepend_path 'PKG_CONFIG_PATH', "#{opt}/lib/pkgconfig"
       ENV.prepend_path 'PKG_CONFIG_PATH', "#{opt}/share/pkgconfig"
-
-      if superenv?
-        ENV.prepend 'HOMEBREW_DEP_PREFIXES', dep.name
-      else
-        ENV.prepend 'LDFLAGS', "-L#{opt}/lib" if (opt/:lib).directory?
-        ENV.prepend 'CPPFLAGS', "-I#{opt}/include" if (opt/:include).directory?
-        ENV.prepend_path 'ACLOCAL_PATH', "#{opt}/share/aclocal"
-        ENV.prepend_path 'CMAKE_PREFIX_PATH', opt
-      end
+      ENV.prepend_path 'ACLOCAL_PATH', "#{opt}/share/aclocal"
+      ENV.prepend_path 'CMAKE_PREFIX_PATH', opt
+      ENV.prepend 'LDFLAGS', "-L#{opt}/lib" if (opt/:lib).directory?
+      ENV.prepend 'CPPFLAGS', "-I#{opt}/include" if (opt/:include).directory?
     end
   end
+
+  f.recursive_requirements.each { |req| req.modify_build_environment }
 
   if f.fails_with? ENV.compiler
     cs = CompilerSelector.new f

@@ -20,6 +20,8 @@ def superenv?
 end
 
 class << ENV
+  attr :deps, true
+
   def reset
     %w{CC CXX LD CPP OBJC MAKE
       CFLAGS CXXFLAGS OBJCFLAGS OBJCXXFLAGS LDFLAGS CPPFLAGS
@@ -50,9 +52,10 @@ class << ENV
     ENV['PATH'] = determine_path
     ENV['PKG_CONFIG_PATH'] = determine_pkg_config_path
     ENV['HOMEBREW_CCC'] = 'b' if ARGV.build_bottle?
-    ENV['HOMEBREW_MACOS'] = MACOS_VERSION.to_s
+    ENV['HOMEBREW_SDKROOT'] = "#{MacOS.sdk_path}" if MacSystem.xcode43_without_clt?
     ENV['CMAKE_PREFIX_PATH'] = determine_cmake_prefix_path
     ENV['CMAKE_FRAMEWORK_PATH'] = "#{MacOS.sdk_path}/System/Library/Frameworks" if MacSystem.xcode43_without_clt?
+    ENV['CMAKE_INCLUDE_PATH'] = determine_cmake_include_path
   end
 
   def universal_binary
@@ -103,34 +106,38 @@ class << ENV
   end
 
   def determine_path
-    #TODO pick paths completely ourselves
-    paths = ORIGINAL_PATHS.dup
-    paths.delete(HOMEBREW_PREFIX/:bin)
-    paths.unshift("/opt/X11/bin")
-    paths.unshift("#{HOMEBREW_PREFIX}/bin")
+    paths = [superenv_bin]
     if MacSystem.xcode43_without_clt?
-      paths.unshift("#{MacSystem.xcode43_developer_dir}/usr/bin")
-      paths.unshift("#{MacSystem.xcode43_developer_dir}/Toolchains/XcodeDefault.xctoolchain/usr/bin")
+      paths << "#{MacSystem.xcode43_developer_dir}/usr/bin"
+      paths << "#{MacSystem.xcode43_developer_dir}/Toolchains/XcodeDefault.xctoolchain/usr/bin"
     end
-    paths.unshift(superenv_bin)
+    paths += deps.map{|dep| "#{HOMEBREW_PREFIX}/opt/#{dep}/bin" }
+    paths << HOMEBREW_PREFIX/:bin
+    paths << "#{MacSystem.x11_prefix}/bin"
+    paths += %w{/usr/bin /bin /usr/sbin /sbin}
     paths.to_path_s
   end
 
   def determine_pkg_config_path
-    paths = %w{/opt/X11/lib/pkgconfig /opt/X11/share/pkgconfig
-               /usr/X11/lib/pkgconfig /usr/X11/share/pkgconfig}
-    if MacOS.mountain_lion?
-      # Mountain Lion no longer ships some .pcs; ensure we pick up our versions
-      paths << "#{HOMEBREW_REPOSITORY}/Library/Homebrew/pkgconfig"
-    end
+    paths = deps.map{|dep| "#{HOMEBREW_PREFIX}/opt/#{dep}/lib/pkgconfig" }
+    paths << "#{MacSystem.x11_prefix}/lib/pkgconfig" << "#{MacSystem.x11_prefix}/share/pkgconfig"
+    # Mountain Lion no longer ships some .pcs; ensure we pick up our versions
+    paths << "#{HOMEBREW_REPOSITORY}/Library/Homebrew/pkgconfig" if MacOS.mountain_lion?
     paths.to_path_s
   end
 
   def determine_cmake_prefix_path
-    paths = []
+    paths = deps.map{|dep| "#{HOMEBREW_PREFIX}/opt/#{dep}" }
     paths << "#{MacOS.sdk_path}/usr" if MacSystem.xcode43_without_clt?
-    paths << HOMEBREW_PREFIX.to_s unless HOMEBREW_PREFIX.to_s == "/usr/local"
+    paths << HOMEBREW_PREFIX.to_s if MacSystem.xcode43_without_clt? or HOMEBREW_PREFIX.to_s == "/usr/local"
     paths << MacSystem.x11_prefix
+    paths.to_path_s
+  end
+
+  def determine_cmake_include_path
+    sdk = MacOS.sdk_path if MacSystem.xcode43_without_clt?
+    paths = %W{#{MacSystem.x11_prefix}/include/freetype2}
+    paths << "#{sdk}/usr/include/libxml2" unless deps.include? 'libxml2'
     paths.to_path_s
   end
 
@@ -145,9 +152,10 @@ class << ENV
   def compiler
     case ENV['CC']
       when "llvm-gcc" then :llvm
-      when "gcc" then :gcc
+      when "gcc", "clang" then ENV['CC'].to_sym
+      when nil then MacOS.default_compiler
     else
-      :clang
+      raise
     end
   end
   def deparallelize

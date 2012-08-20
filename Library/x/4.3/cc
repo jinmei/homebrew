@@ -7,6 +7,7 @@
 #dedupe -I, -L and -F for legibility
 #TODO stuff that will be included with <> must be -isystem included for serious
 #TODO make it work with our GCC
+#TODO look for formula that adjust LDFLAGS/CPPFLAGS for deps and make them work
 
 class String
   def parent; File.dirname self end
@@ -18,10 +19,11 @@ class NilClass
   def chuzzle; end
   def directory?; false end
   def parent; end
+  def split(x); [] end
 end
 class Array
   def to_flags prefix
-    select{|path| path.directory? }.map{|path| prefix+path }
+    select{|path| path.directory? }.uniq.map{|path| prefix+path }
   end
 end
 def ccc? flags
@@ -32,13 +34,17 @@ def macos
   tst.call(ENV['HOMEBREW_MACOS']) || tst.call(ENV['MACOS_DEPLOYMENT_TARGET']) || tst.call(`/usr/bin/sw_vers -productVersion`)
 end
 def nclt?
-  not File.executable? "/usr/bin/cc"
+  $sdkroot != nil
 end
-def lxml2?
-  not (deps.include? 'libxml2' or ccc? 'x')
-end
-def deps
-  (ENV['HOMEBREW_DEP_PREFIXES'] || "").split
+def cmake_prefixes
+  @prefixes ||= ENV['CMAKE_PREFIX_PATH'].split(':').reject do |path|
+    case path
+    when '/usr/local'
+      !nclt?
+    when '/usr', '/', "#$sdkroot/usr"
+      true
+    end
+  end
 end
 def driver
   case $0
@@ -60,17 +66,15 @@ def cflags
   end
 end
 def ldflags
-  ff = deps.map{|dep| "#$brewfix/opt/#{dep}/lib" }
-  ff << "#$brewfix/lib" if nclt? or $brewfix != "/usr/local"
-  ff << "#$x11root/lib" if $x11root
-  ff.to_flags('-L')
+  cmake_prefixes.map{|prefix| "#{prefix}/lib" }.to_flags('-L')
 end
 def cppflags
-  ff = deps.map{|dep| "#$brewfix/opt/#{dep}/include" }
-  ff << "#$brewfix/include" if nclt? or $brewfix != "/usr/local"
-  ff << "#$x11root/include" << "#$x11root/include/freetype2" if $x11root
-  ff << "#$sdkroot/usr/include/libxml2" if lxml2?
-  ff.to_flags('-isystem')
+  all = cmake_prefixes.map{|prefix| "#{prefix}/include" }
+  opt = all.select{|prefix| prefix =~ %r{^#$brewfix/opt} }
+  sys = all - opt + ENV['CMAKE_INCLUDE_PATH'].split(':')
+  # we want our keg-only includes to be found before system includes so that
+  # they override the system options.
+  sys.to_flags('-isystem') + opt.to_flags('-I')
 end
 def ccclean
   args = []
@@ -113,21 +117,9 @@ end if ENV['HOMEBREW_LOG']
 $0 = $0.basename
 $0 = case $0 when 'cc' then 'clang' when 'c++' then 'clang++' else $0 end
 $brewfix = File.expand_path("#{__FILE__}/../../../../")
-$sdkroot = begin
-  tst = Proc.new{|path| path.strip if path.directory? and path != "/" }
-  d = tst.call(ENV['DEVELOPER_DIR']) || 
-      tst.call(`xcode-select -print-path`) ||
-      tst.call("/Applications/Xcode.app/Contents/Developer")
-  "#{d}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX#{macos}.sdk"
-end
-$x11root = begin
-  %W{#{$sdkroot}/usr/X11/include /usr/X11/include /opt/X11/include}.find do |incdir|
-    incdir.directory?
-  end.parent
-end
+$sdkroot = ENV['HOMEBREW_SDKROOT']
 
 ####################################################################### sanity
-abort "Bad SDK state" if nclt? and not $sdkroot.directory?
 abort "Bad driver" unless driver
 
 ######################################################################## logic
@@ -138,7 +130,7 @@ else
 end
 
 newarg = if driver == :ld
-  "--syslibroot=#$sdkroot/usr/lib"
+  "-syslibroot=#$sdkroot"
 else
   "--sysroot=#$sdkroot"
 end if nclt?
