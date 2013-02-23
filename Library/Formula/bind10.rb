@@ -2,9 +2,9 @@ require 'formula'
 
 class Bind10 < Formula
   homepage 'http://www.isc.org/software/bind10/'
-  url 'ftp://ftp.isc.org/isc/bind10/1.0.0-rc/bind10-1.0.0-rc.tar.gz'
-  version '1.0.0-rc'
-  sha1 '7f1586a73ede1832aa9bff0fffaa25abb848c02f'
+  url 'ftp://ftp.isc.org/isc/bind10/1.0.0/bind10-1.0.0.tar.gz'
+  version '1.0.0'
+  sha1 '15b0000ea3c3ff7d26401ca204244869cc79b2f0'
 
   depends_on "python3"
   depends_on "boost"
